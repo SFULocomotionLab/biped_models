@@ -1,0 +1,25 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Python: run_simulation",
+        "type": "python",
+        "request": "launch",
+        "program": "${workspaceFolder}/scripts/simplest_walker/run_simulation.py",
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}"
+        }
+      }
+      {
+        "name": "Python: run_find_gait",
+        "type": "python",
+        "request": "launch",
+        "program": "${workspaceFolder}/scripts/simplest_walker/run_find_gait.py",
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}"
+        }
+      }
+    ]
+}
