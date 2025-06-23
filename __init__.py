@@ -1,0 +1,3 @@
+"""
+Biped models package.
+""" 
