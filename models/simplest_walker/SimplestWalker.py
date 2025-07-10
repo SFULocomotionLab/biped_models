@@ -237,7 +237,7 @@ class SimplestWalker(BipedBaseClass):
 
         return step_length, speed, hip_dist, step_time
 
-    def calculate_energy(self):
+    def calculate_energy(self, P, k1, k2):
         """Calculate energetic costs of walking.
 
         Returns:
@@ -247,23 +247,32 @@ class SimplestWalker(BipedBaseClass):
                 - w_total: Total work per unit distance
         """
         # Get final state values
-        k = self.int_sol.y[2, -1]  # Hip spring constant
         v_com = self.int_sol.y[1, -1]  # COM velocity before heel strike
-        alpha = self.int_sol.y[0, -1]  # Stance angle at ground contact
+        alpha = np.abs(self.int_sol.y[0, -1])  # Stance angle at ground contact
 
         # -------------------- toe off work ---------------------------
         # 1- Conservation of angular momentum method
         # Uses law of conservation of angular momentum twice:
         # Once for before/after pushoff and once for before/after heel strike
-        # Total work divided by 2
-        w1 = 0.25 * (v_com**2) * ((np.tan(abs(alpha))**2)/(np.cos(abs(alpha))**2) + np.tan(abs(alpha))**2)
-        w_toe1 = w1/self.step_length
+        # we calculate positive work of pushoff and negative work of heel strike separately
+        # we are assuming that heel strike happens before pushoff
+
+        # the following is only valid for limit cycle gait where work of pushoff=collision
+        # w_toe1 = 0.25 * (v_com**2) * ((np.tan(abs(alpha))**2)/(np.cos(abs(alpha))**2) + np.tan(abs(alpha))**2) 
+
+        # the following is based on Kuo's eqn 7 (transition eqn)
+        thetaDot_negneg = np.abs(self.int_sol.y[1, -1]) # stance angular velocity before pushoff (magnitude)
+        thetaDot_negpos =  np.cos(2*alpha) * thetaDot_negneg  # stance angular velocity after heel strike and before pushoff
+        thetaDot_pospos = thetaDot_negpos + np.sin(2*alpha) * P # stance angular velocity after pushoff
+
+        w_collision = 0.5 * (thetaDot_negpos**2 - thetaDot_negneg**2) 
+        w_pushoff = 0.5 * (thetaDot_pospos**2 - thetaDot_negpos**2)
 
         # 2- Manoj's dissertation method
         # No small angle approximation
         # Derived from conservation of linear momentum before/after push off
         # w2 = 0.5 * (v_com**2) * np.tan(abs(alpha))**2  # Eqn 2.8 pg 24
-        # w_toe2 = w2/self.step_length
+        # w_toe2 = w2
 
         # 3- Ruina's paper (2005) method - uses small angle approximation
         # phi = 2 * abs(alpha)
@@ -280,19 +289,63 @@ class SimplestWalker(BipedBaseClass):
         # w_toe4 = 0.25 * v_com**2 * abs(alpha)
 
         # ---------------------- swing work ---------------------------
-        # Kuo's methods - all are cost of transport (divided by 2*alpha)
-        # 4 versions from Table 1, Kuo 2001 paper
-        e_swing1 = k * alpha  # Based on swing work (eqn 8)
+        # 4 versions from Table 1, Kuo 2001 paper- note that all are cost of transport (divided by 2*alpha)
+        #e_swing1 = k1 * alpha  # Based on swing work (eqn 8)
         # e_swing2 = k  # Based on peak force (eqn 9)
         # e_swing3 = k * self.step_time  # Based on impulse (eqn 10)
         # e_swing4 = k / self.step_time  # Based on force/time (eqn 11)
 
-        # Use first method for now
-        w_toe = w_toe1
-        w_swing = e_swing1
-        w_total = w_toe + w_swing
+        # 1- my method
+        # here I calculate spring positve and negative work separately 
+        # (each of swing half and based on k1 and k2)
+        # phi = self.int_sol.y[2, :]
+        # phi_positive = phi[phi > 0]
+        # phi_negative = phi[phi < 0]
+        # w_swing1 = 0.5 * k1 * (phi_positive[-1]-phi_positive[0])**2
+        # w_swing2 = 0.5 * k2 * (phi_negative[-1]-phi_negative[0])**2
+        
+        # if k1 > 0 and k2 > 0:
+        #     w_swing_positive = np.abs(w_swing1)
+        #     w_swing_negative = np.abs(w_swing2)
+        # elif k1 > 0 and k2 < 0:
+        #     w_swing_positive = np.abs(w_swing1) + np.abs(w_swing2)
+        #     w_swing_negative = 0
+        # elif k1 < 0 and k2 > 0:
+        #     w_swing_positive = 0
+        #     w_swing_negative = np.abs(w_swing1) + np.abs(w_swing2)
+        # elif k1 < 0 and k2 < 0:
+        #     w_swing_positive = np.abs(w_swing2)
+        #     w_swing_negative = np.abs(w_swing1)
+        
+        # bsw1 = 1
+        # bsw2 = 1
+        # w_swing = bsw1 * w_swing_positive + bsw2 * w_swing_negative
 
-        return w_toe, w_swing, w_total
+        # 2- swing cost is force/time based on Kuo 2001 paper
+        phi = self.int_sol.y[2, :]
+        phi_positive = phi[phi > 0]
+        phi_negative = phi[phi < 0]
+        time_1 = self.int_sol.t[phi > 0] # first half of swing
+        time_2 = self.int_sol.t[phi < 0] # second half of swing
+        swing_force_1 = np.abs(k1*(phi_positive[-1]-phi_positive[0]))
+        swing_force_2 = np.abs(k2*(phi_negative[-1]-phi_negative[0]))
+        swing_f_over_t = (swing_force_1 + swing_force_2)/self.step_time
+        w_swing = swing_f_over_t # this is not wotk but f/t. naming is just for convention
+
+        # Work rate, i.e. divide work by step time (not used yet)
+        w_pushoff_rate = w_pushoff/self.step_time
+        w_collision_rate = w_collision/self.step_time
+        w_swing_rate = w_swing/self.step_time
+
+        # ---------------------- total work ---------------------------
+        C_toe = 1  #arbitrary
+        C_positive = 4
+        C_negative = 0.8
+        C_swing = 0.022 #arbitrary
+        C_offset = 0.1 #arbitrary
+        w_total_rate = C_positive * w_pushoff_rate + C_negative * np.abs(w_collision_rate) + C_swing * w_swing_rate + C_offset * self.step_time/self.step_length
+
+        return w_pushoff_rate, w_collision_rate, w_swing_rate, w_total_rate
     
     def apply_feedback_controller(self, x, K_gain):
         """Calculate control inputs using feedback control.
